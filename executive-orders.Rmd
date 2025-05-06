@@ -1,0 +1,190 @@
+---
+title: Executive Order Statistics
+author: Joseph Skubal
+output: html_document
+---
+
+## Resources:
+* [Executive Orders List](https://www.federalregister.gov/presidential-documents/executive-orders)
+
+```{r, include = FALSE}
+library(dplyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(lubridate)
+library(forcats)
+library(knitr)
+```
+
+```{r}
+data_fetch_date <- ymd("2025-05-03")
+months <- 1:12
+names(months) <- c(
+  "Jan", "Feb", "March", "April", "May", "June",
+  "July", "Aug", "Sept", "Oct", "Nov", "Dec"
+)
+
+duration_to_days <- function(d) {
+  as.numeric(days(d)) / 86400
+}
+
+# The months in the date format on the president sheet are non-standard,
+# so we're going to parse it manually
+parse_date_format <- function(s) {
+  matches <- str_match(s, "([:alpha:]+).? ([:digit:]+), ([:digit:]+)")
+  year <- parse_integer(matches[, 4])
+  month <- months[matches[, 2]]
+  day <- parse_integer(matches[, 3])
+  make_date(year, month, day)
+}
+```
+
+```{r}
+data_fetch_date <- ymd(readChar("./last_update", nchars = 10))
+
+orders <- read_csv(
+  "./executive_orders.csv",
+  guess_max = 10000,
+  show_col_types = FALSE,
+)
+
+presidents <- read_tsv("./presidents.tsv", show_col_types = FALSE) |>
+  mutate(
+    term_start = parse_date_format(`Term Began`),
+    term_end = coalesce(parse_date_format(`Term Ended`), data_fetch_date),
+    time_in_office = difftime(coalesce(term_end, data_fetch_date), term_start)
+  ) |>
+  select(name = `President Name`, term_start, term_end, time_in_office)
+```
+
+## Orders by President
+
+```{r}
+orders_by_presidents <- left_join(
+  presidents,
+  orders,
+  by = join_by(term_start <= signing_date, term_end > signing_date),
+) |>
+  group_by(name) |>
+  summarize(
+    first_term_start = min(term_start),
+    num_orders = sum(!is.na(signing_date)),
+  ) |>
+  filter(num_orders > 0) |>
+  inner_join(
+    summarize(group_by(presidents, name), time_in_office = sum(time_in_office)),
+    by = join_by(name)
+  ) |>
+  arrange(first_term_start) |>
+  mutate(
+    name = ordered(name, levels = name),
+    orders_per_day_in_office = num_orders / duration_to_days(time_in_office),
+  )
+
+kable(orders_by_presidents)
+```
+
+```{r, echo=FALSE}
+ggplot(orders_by_presidents) +
+  geom_col(aes(name, num_orders, fill = 1), show.legend = FALSE) +
+  labs(x = "President", y = "Executive Orders") +
+  scale_y_continuous(
+    breaks = seq(0, 2500, by = 250),
+    expand = expansion(mult = c(0, 0.05), add = 0)
+  ) +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
+    plot.margin = margin(10, 20, 10, 10)
+  )
+```
+
+```{r, echo=FALSE}
+ggplot(orders_by_presidents) +
+  geom_col(aes(name, orders_per_day_in_office, fill = 1), show.legend = FALSE) +
+  labs(x = "President", y = "Executive Orders Per Day In Office") +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.05), add = 0)
+  ) +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
+    plot.margin = margin(10, 20, 10, 10)
+  )
+```
+
+## Orders by Term
+
+```{r}
+format_term <- function(is_multi_term, name, term_idx) {
+  if (is_multi_term) {
+    str_c(name, " ", term_idx)
+  } else {
+    name
+  }
+}
+
+orders_by_terms <- group_by(presidents, name) |>
+  mutate(
+    term_idx = row_number(name),
+    is_multi_term = length(name) > 1,
+  ) |>
+  left_join(
+    orders,
+    by = join_by(term_start <= signing_date, term_end > signing_date),
+  ) |>
+  group_by(name, term_idx) |>
+  summarize(
+    term_start = min(term_start),
+    is_multi_term = max(is_multi_term), # TRUE if any is true
+    term_length = difftime(max(term_end), min(term_start)),
+    num_orders = sum(!is.na(signing_date)),
+  ) |>
+  filter(num_orders > 0) |>
+  arrange(term_start) |>
+  mutate(
+    term_id = Vectorize(format_term)(is_multi_term, name, term_idx),
+    orders_per_day = num_orders / duration_to_days(term_length),
+  ) |>
+  select(term_id, term_start, term_length, num_orders, orders_per_day)
+
+kable(orders_by_terms)
+```
+
+```{r, echo=FALSE}
+ggplot(orders_by_terms) +
+  geom_col(
+    aes(fct_reorder(term_id, term_start), num_orders, fill = 1),
+    show.legend = FALSE,
+  ) +
+  labs(x = "Presidental Term", y = "Executive Orders") +
+  scale_y_continuous(
+    breaks = seq(0, 2500, by = 250),
+    expand = expansion(mult = c(0, 0.05), add = 0)
+  ) +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
+    plot.margin = margin(10, 45, 10, 10)
+  )
+```
+
+```{r, echo=FALSE}
+ggplot(orders_by_terms) +
+  geom_col(
+    aes(fct_reorder(term_id, term_start), orders_per_day, fill = 1),
+    show.legend = FALSE,
+  ) +
+  labs(x = "Presidental Term", y = "Executive Orders Per Day In Office") +
+  scale_y_continuous(
+    breaks = seq(0, 2, by = 0.1),
+    expand = expansion(mult = c(0, 0.05), add = 0)
+  ) +
+  theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
+    plot.margin = margin(10, 45, 10, 10)
+  )
+```
+
