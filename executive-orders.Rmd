@@ -47,15 +47,15 @@ orders <- read_csv(
   "./executive_orders.csv",
   guess_max = 10000,
   show_col_types = FALSE,
-)
+) |> mutate(date = coalesce(signing_date, publication_date))
 
 presidents <- read_tsv("./presidents.tsv", show_col_types = FALSE) |>
   mutate(
-    term_start = parse_date_format(`Term Began`),
-    term_end = coalesce(parse_date_format(`Term Ended`), data_fetch_date),
-    time_in_office = difftime(coalesce(term_end, data_fetch_date), term_start)
+    term = parse_date_format(`Term Began`) %--%
+      coalesce(parse_date_format(`Term Ended`), data_fetch_date),
+    days_in_office = term / ddays(),
   ) |>
-  select(name = `President Name`, term_start, term_end, time_in_office)
+  select(name = `President Name`, term, days_in_office)
 ```
 
 ## Orders by President
@@ -64,22 +64,27 @@ presidents <- read_tsv("./presidents.tsv", show_col_types = FALSE) |>
 orders_by_presidents <- left_join(
   presidents,
   orders,
-  by = join_by(term_start <= signing_date, term_end > signing_date),
+  by = join_by(name == president),
+  relationship = "many-to-many", # mended in filter below
 ) |>
+  filter(date %within% term) |>
   group_by(name) |>
   summarize(
-    first_term_start = min(term_start),
-    num_orders = sum(!is.na(signing_date)),
+    first_term_start = min(int_start(term)),
+    num_orders = sum(!is.na(date)),
   ) |>
   filter(num_orders > 0) |>
   inner_join(
-    summarize(group_by(presidents, name), time_in_office = sum(time_in_office)),
+    summarize(
+      group_by(presidents, name),
+      days_in_office = sum(days_in_office),
+    ),
     by = join_by(name)
   ) |>
   arrange(first_term_start) |>
   mutate(
     name = ordered(name, levels = name),
-    orders_per_day_in_office = num_orders / duration_to_days(time_in_office),
+    orders_per_day_in_office = num_orders / duration_to_days(days_in_office),
   )
 
 kable(orders_by_presidents)
@@ -126,27 +131,21 @@ format_term <- function(is_multi_term, name, term_idx) {
 }
 
 orders_by_terms <- group_by(presidents, name) |>
-  mutate(
-    term_idx = row_number(name),
-    is_multi_term = length(name) > 1,
-  ) |>
+  mutate(term_id = format_term(length(name) > 1, name, row_number(name))) |>
   left_join(
     orders,
-    by = join_by(term_start <= signing_date, term_end > signing_date),
+    by = join_by(name == president),
+    relationship = "many-to-many",
   ) |>
-  group_by(name, term_idx) |>
+  filter(date %within% term) |>
+  group_by(term_id) |>
   summarize(
-    term_start = min(term_start),
-    is_multi_term = max(is_multi_term), # TRUE if any is true
-    term_length = difftime(max(term_end), min(term_start)),
-    num_orders = sum(!is.na(signing_date)),
+    term_start = min(int_start(term)),
+    term_length = first(days_in_office),
+    num_orders = sum(!is.na(date)),
   ) |>
-  filter(num_orders > 0) |>
   arrange(term_start) |>
-  mutate(
-    term_id = Vectorize(format_term)(is_multi_term, name, term_idx),
-    orders_per_day = num_orders / duration_to_days(term_length),
-  ) |>
+  mutate(orders_per_day = num_orders / duration_to_days(term_length)) |>
   select(term_id, term_start, term_length, num_orders, orders_per_day)
 
 kable(orders_by_terms)
