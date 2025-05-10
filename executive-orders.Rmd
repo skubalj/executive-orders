@@ -15,29 +15,28 @@ library(ggplot2)
 library(lubridate)
 library(forcats)
 library(knitr)
-```
-
-```{r}
-data_fetch_date <- ymd("2025-05-03")
-months <- 1:12
-names(months) <- c(
-  "Jan", "Feb", "March", "April", "May", "June",
-  "July", "Aug", "Sept", "Oct", "Nov", "Dec"
-)
 
 duration_to_days <- function(d) {
   as.numeric(days(d)) / 86400
 }
 
-# The months in the date format on the president sheet are non-standard,
-# so we're going to parse it manually
-parse_date_format <- function(s) {
-  matches <- str_match(s, "([:alpha:]+).? ([:digit:]+), ([:digit:]+)")
-  year <- parse_integer(matches[, 4])
-  month <- months[matches[, 2]]
-  day <- parse_integer(matches[, 3])
-  make_date(year, month, day)
+format_term <- function(is_multi_term, name, term_idx) {
+  if (is_multi_term) {
+    str_c(name, " ", term_idx)
+  } else {
+    name
+  }
 }
+
+party_colors <- scale_fill_manual(values = c(
+  Democratic = "#1277ca",
+  Republican = "#ce162b"
+))
+custom_theme <- theme_linedraw() +
+  theme(
+    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
+    plot.margin = margin(10, 10, 10, 10)
+  )
 ```
 
 ```{r}
@@ -49,141 +48,140 @@ orders <- read_csv(
   show_col_types = FALSE,
 ) |> mutate(date = coalesce(signing_date, publication_date))
 
-presidents <- read_tsv("./presidents.tsv", show_col_types = FALSE) |>
+presidents <- read_csv("./presidents.csv", show_col_types = FALSE) |>
   mutate(
-    term = parse_date_format(`Term Began`) %--%
-      coalesce(parse_date_format(`Term Ended`), data_fetch_date),
-    days_in_office = term / ddays(),
+    term_end = coalesce(term_end, data_fetch_date),
+    term_100_days = term_start + days(100),
+    days_in_office = duration_to_days(term_end - term_start),
   ) |>
-  select(name = `President Name`, term, days_in_office)
+  group_by(name) |>
+  mutate(term_id = format_term(length(name) > 1, name, row_number(name)))
 ```
 
 ## Orders by President
 
 ```{r}
-orders_by_presidents <- left_join(
-  presidents,
-  orders,
-  by = join_by(name == president),
-  relationship = "many-to-many", # mended in filter below
-) |>
-  filter(date %within% term) |>
-  group_by(name) |>
+orders_by_presidents <- group_by(presidents, name, party) |>
   summarize(
-    first_term_start = min(int_start(term)),
-    num_orders = sum(!is.na(date)),
+    first_term_start = min(term_start),
+    days_in_office = sum(days_in_office),
   ) |>
-  filter(num_orders > 0) |>
-  inner_join(
-    summarize(
-      group_by(presidents, name),
-      days_in_office = sum(days_in_office),
-    ),
-    by = join_by(name)
-  ) |>
+  inner_join(orders, by = join_by(name == president)) |>
+  group_by(name, party, days_in_office, first_term_start) |>
+  summarize(num_orders = length(title)) |>
   arrange(first_term_start) |>
   mutate(
-    name = ordered(name, levels = name),
     orders_per_day_in_office = num_orders / duration_to_days(days_in_office),
   )
 
 kable(orders_by_presidents)
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, fig.height=6, fig.width=8}
 ggplot(orders_by_presidents) +
-  geom_col(aes(name, num_orders, fill = 1), show.legend = FALSE) +
+  geom_col(
+    aes(fct_reorder(name, first_term_start), num_orders, fill = party)
+  ) +
   labs(x = "President", y = "Executive Orders") +
   scale_y_continuous(
-    breaks = seq(0, 2500, by = 250),
+    breaks = seq(0, 2500, by = 200),
     expand = expansion(mult = c(0, 0.05), add = 0)
   ) +
-  theme_linedraw() +
-  theme(
-    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
-    plot.margin = margin(10, 20, 10, 10)
-  )
+  party_colors +
+  custom_theme
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, fig.height=6, fig.width=8}
 ggplot(orders_by_presidents) +
-  geom_col(aes(name, orders_per_day_in_office, fill = 1), show.legend = FALSE) +
+  geom_col(
+    aes(
+      fct_reorder(name, first_term_start),
+      orders_per_day_in_office,
+      fill = party,
+    ),
+  ) +
   labs(x = "President", y = "Executive Orders Per Day In Office") +
   scale_y_continuous(
+    breaks = seq(0, 2, by = 0.05),
     expand = expansion(mult = c(0, 0.05), add = 0)
   ) +
-  theme_linedraw() +
-  theme(
-    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
-    plot.margin = margin(10, 20, 10, 10)
-  )
+  party_colors +
+  custom_theme
 ```
 
 ## Orders by Term
 
 ```{r}
-format_term <- function(is_multi_term, name, term_idx) {
-  if (is_multi_term) {
-    str_c(name, " ", term_idx)
-  } else {
-    name
-  }
-}
-
-orders_by_terms <- group_by(presidents, name) |>
-  mutate(term_id = format_term(length(name) > 1, name, row_number(name))) |>
-  left_join(
-    orders,
-    by = join_by(name == president),
-    relationship = "many-to-many",
-  ) |>
-  filter(date %within% term) |>
-  group_by(term_id) |>
+orders_by_terms <- inner_join(
+  presidents,
+  orders,
+  by = join_by(name == president, between(y$date, x$term_start, x$term_end)),
+) |>
+  group_by(term_id, party) |>
   summarize(
-    term_start = min(int_start(term)),
+    term_start = min(term_start),
     term_length = first(days_in_office),
-    num_orders = sum(!is.na(date)),
+    num_orders = length(title),
   ) |>
   arrange(term_start) |>
   mutate(orders_per_day = num_orders / duration_to_days(term_length)) |>
-  select(term_id, term_start, term_length, num_orders, orders_per_day)
+  select(term_id, party, term_start, term_length, num_orders, orders_per_day)
 
 kable(orders_by_terms)
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, fig.height=6, fig.width=8}
 ggplot(orders_by_terms) +
-  geom_col(
-    aes(fct_reorder(term_id, term_start), num_orders, fill = 1),
-    show.legend = FALSE,
-  ) +
+  geom_col(aes(fct_reorder(term_id, term_start), num_orders, fill = party)) +
   labs(x = "Presidental Term", y = "Executive Orders") +
   scale_y_continuous(
-    breaks = seq(0, 2500, by = 250),
+    breaks = seq(0, 2500, by = 200),
     expand = expansion(mult = c(0, 0.05), add = 0)
   ) +
-  theme_linedraw() +
-  theme(
-    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
-    plot.margin = margin(10, 45, 10, 10)
-  )
+  party_colors +
+  custom_theme
 ```
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, fig.height=6, fig.width=8}
 ggplot(orders_by_terms) +
   geom_col(
-    aes(fct_reorder(term_id, term_start), orders_per_day, fill = 1),
-    show.legend = FALSE,
+    aes(fct_reorder(term_id, term_start), orders_per_day, fill = party)
   ) +
   labs(x = "Presidental Term", y = "Executive Orders Per Day In Office") +
   scale_y_continuous(
-    breaks = seq(0, 2, by = 0.1),
+    breaks = seq(0, 2, by = 0.05),
     expand = expansion(mult = c(0, 0.05), add = 0)
   ) +
-  theme_linedraw() +
-  theme(
-    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
-    plot.margin = margin(10, 45, 10, 10)
-  )
+  party_colors +
+  custom_theme
 ```
 
+## Orders in First 100 days
+
+```{r}
+orders_100_days <- inner_join(
+  presidents,
+  orders,
+  by = join_by(
+    name == president,
+    between(y$date, x$term_start, x$term_100_days),
+  ),
+) |>
+  group_by(term_id, party) |>
+  summarize(term_start = min(term_start), num_orders = length(title)) |>
+  arrange(term_start)
+
+kable(orders_100_days)
+```
+
+```{r, echo=FALSE, fig.height=6, fig.width=8}
+ggplot(orders_100_days) +
+  geom_col(aes(fct_reorder(term_id, term_start), num_orders, fill = party)) +
+  labs(x = "Presidental Term", y = "Executive Orders In First 100 Days") +
+  scale_y_continuous(
+    breaks = seq(0, 250, by = 10),
+    expand = expansion(mult = c(0, 0.05), add = 0)
+  ) +
+  party_colors +
+  custom_theme
+```
