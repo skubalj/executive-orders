@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/alexflint/go-arg"
@@ -28,7 +27,7 @@ const rootURL = "https://www.federalregister.gov/api/v1/documents.json" +
 	"&conditions[presidential_document_type][]=executive_order"
 
 type Args struct {
-	Output string `arg:"positional" help:"Output CSV File"`
+	Output string `arg:"positional,required" help:"Output CSV File"`
 }
 
 func (a Args) Description() string {
@@ -111,10 +110,6 @@ type ResponseRow struct {
 	PublicationDate string `json:"publication_date"`
 }
 
-func replaceNewlines(s string) string {
-	return strings.ReplaceAll(s, "\n", "\\n")
-}
-
 var ResponseRowHeader = []string{
 	"title",
 	"citation",
@@ -126,12 +121,12 @@ var ResponseRowHeader = []string{
 
 func (r ResponseRow) ToStrings() []string {
 	return []string{
-		replaceNewlines(r.Title),
-		replaceNewlines(r.Citation),
-		replaceNewlines(r.DocumentNumber),
-		replaceNewlines(r.President.Name),
-		replaceNewlines(r.SigningDate),
-		replaceNewlines(r.PublicationDate),
+		r.Title,
+		r.Citation,
+		r.DocumentNumber,
+		r.President.Name,
+		r.SigningDate,
+		r.PublicationDate,
 	}
 }
 
