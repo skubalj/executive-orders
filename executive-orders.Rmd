@@ -40,7 +40,7 @@ custom_theme <- theme_linedraw() +
 ```
 
 ```{r}
-data_fetch_date <- ymd(readChar("./last_update", nchars = 10))
+data_fetch_date <- ymd(read_file("./last_update"))
 
 orders <- read_csv(
   "./executive_orders.csv",
