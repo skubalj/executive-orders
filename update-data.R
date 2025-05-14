@@ -36,14 +36,14 @@ fetch_page <- function(page_number) {
     resp_body_string() |>
     I() |>
     readr::read_csv(show_col_types = FALSE)
-  print(glue("Fetched page {page_number} ({length(df[[1]])} records)"))
+  print(glue("Fetched page {page_number} ({nrow(df)} records)"))
   df
 }
 
 current_page <- 1
 page_df <- fetch_page(current_page)
 df <- page_df
-while (length(page_df[[1]]) == page_size) {
+while (nrow(page_df) == page_size) {
   current_page <- current_page + 1
   page_df <- fetch_page(current_page)
   df <- bind_rows(df, page_df)
