@@ -55,4 +55,3 @@ df <- df |> mutate(
 )
 
 write_csv(df, args$output_file)
-write_file(as.character(today()), "last_update")
