@@ -185,3 +185,32 @@ ggplot(orders_100_days) +
   party_colors +
   custom_theme
 ```
+
+## Orders Over Term
+
+```{r}
+daily_order_totals <- inner_join(
+  presidents,
+  orders,
+  by = join_by(
+    name == president,
+    between(y$date, x$term_start, x$term_end),
+  ),
+) |>
+  filter(term_start > "1945-01-01") |>
+  mutate(days_into_term = date - term_start) |>
+  group_by(term_id, term_start, days_into_term) |>
+  summarize(num_on_day = length(date)) |>
+  mutate(num_before_day = cumsum(num_on_day)) |>
+  arrange(term_start)
+```
+
+```{r}
+ggplot(daily_order_totals) +
+  geom_line(aes(days_into_term, num_before_day, color = fct_reorder(term_id, term_start))) +
+  labs(x = "Days Into Presidential Term", y = "Total Executive Orders", color = "President") +
+  scale_x_continuous(breaks = seq(0, 9 * 365, 180), expand = expansion(mult = 0, add = 25)) +
+  scale_y_continuous(breaks = seq(0, 1000, 100), expand = expansion(mult = 0, add = 10)) +
+  theme_linedraw() +
+  theme(legend.position = "bottom")
+```
