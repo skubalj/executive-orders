@@ -2,7 +2,7 @@
 
 EXECUTIVE_ORDER_FILE="executive_orders.csv"
 
-echo "Updating test data"
+echo "Updating executive order data"
 Rscript ./update-data.R "$EXECUTIVE_ORDER_FILE"
 date -Idate > last_update
 

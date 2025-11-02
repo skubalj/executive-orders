@@ -205,7 +205,7 @@ daily_order_totals <- inner_join(
   arrange(term_start)
 ```
 
-```{r}
+```{r, fig.height=6, fig.width=10}
 ggplot(daily_order_totals) +
   geom_line(aes(days_into_term, num_before_day, color = fct_reorder(term_id, term_start))) +
   labs(x = "Days Into Presidential Term", y = "Total Executive Orders", color = "President") +
