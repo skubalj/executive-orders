@@ -9,8 +9,7 @@ args <- arg_parser(
 
 library(httr2)
 library(glue)
-library(purrr)
-library(dplyr, warn.conflicts = FALSE)
+library(tidyr)
 library(readr)
 
 url <- stringr::str_c( # nolint
@@ -36,20 +35,17 @@ while (!is.null(url)) {
 
   url <- res[["next_page_url"]]
 
-  res[["results"]] |>
-    list_transpose(
-      template = c(
-        "title",
-        "citation",
-        "document_number",
-        "president",
-        "signing_date",
-        "publication_date"
-      ),
-      default = NA,
+  tibble(json = res[["results"]]) |>
+    unnest_wider(json) |> # unpack json lists into columns
+    hoist(president, president_name = "name") |> # unpack president sub-object
+    dplyr::select(
+      title,
+      citation,
+      document_number,
+      president = president_name,
+      signing_date,
+      publication_date
     ) |>
-    as_tibble() |>
-    mutate(president = map_chr(president, ~ .x[["name"]])) |>
     write_csv(args[["output_file"]], na = "", append = page_number != 1)
 
   print(glue("Fetched page {page_number} ({length(res[['results']])} records)"))
