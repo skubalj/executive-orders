@@ -4,8 +4,25 @@ author: Joseph Skubal
 output: html_document
 ---
 
+Executive orders are directives given by the President of the United States of America to executive
+agencies. Their scope and impact range widely. They can be as benign as exempting specific
+individuals from compulsory retirement during the Great Depression, and as impactful as shuttering
+entire government agencies or withholding funds for life saving government programs. However,
+executive orders are not laws. Any order is a test of a president's authority against the other
+branches of government, and some executive orders have been ruled unconsitutional. 
+
+This analysis does not purport to consider the content of orders, their merit, nor legality. It is
+a common refrain that as congress suffers from deadlock and indecision, presidents are using more
+executive orders than ever before. This is often blindly taken as a fact, yet I believe that we
+should look at historical data to truly make that determination.
+
 ## Resources:
-* [Executive Orders List](https://www.federalregister.gov/presidential-documents/executive-orders)
+Data for this analysis was sourced from the [Federal Register](https://www.federalregister.gov/presidential-documents/executive-orders)
+and from Wikipedia's [List of Presidents of the United States](https://en.wikipedia.org/wiki/List_of_presidents_of_the_United_States).
+
+Note that the Federal Register's APIs only contain executive orders since 1937, which is in the 
+middle of FDR's administration. Therefore, we are excluding presidents before Truman (1945)
+from our analyses.
 
 ```{r, include = FALSE}
 library(dplyr)
@@ -15,6 +32,8 @@ library(ggplot2)
 library(lubridate)
 library(forcats)
 library(knitr)
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 
 duration_to_days <- function(d) {
   as.numeric(days(d)) / 86400
@@ -34,8 +53,9 @@ party_colors <- scale_fill_manual(values = c(
 ))
 custom_theme <- theme_linedraw() +
   theme(
-    axis.text.x = element_text(angle = -30, vjust = 1, hjust = 0),
-    plot.margin = margin(10, 10, 10, 10)
+    axis.text.x = element_text(angle = 30, vjust = 0.95, hjust = 1),
+    plot.margin = margin(15, 15, 15, 15),
+    legend.position = "none"
   )
 ```
 
@@ -46,7 +66,8 @@ orders <- read_csv(
   "./executive_orders.csv",
   guess_max = 10000,
   show_col_types = FALSE,
-) |> mutate(date = coalesce(signing_date, publication_date))
+) |>
+  mutate(date = coalesce(signing_date, publication_date))
 
 presidents <- read_csv("./presidents.csv", show_col_types = FALSE) |>
   mutate(
@@ -55,10 +76,19 @@ presidents <- read_csv("./presidents.csv", show_col_types = FALSE) |>
     days_in_office = duration_to_days(term_end - term_start),
   ) |>
   group_by(name) |>
-  mutate(term_id = format_term(length(name) > 1, name, row_number(name)))
+  mutate(term_id = format_term(length(name) > 1, name, row_number(name))) |>
+  # Only include presidents more recent than FDR.
+  # Our data starts in 1937, which is FDR's second term.
+  filter(`No.` > 32)
 ```
 
 ## Orders by President
+
+These charts show the number of executive orders by president. Presidents serving nonconsecutive
+terms have their total shown in the order of the first term. Consider both charts. Single term
+presidents, such as Ford, Carter, and Biden ought to have lower executive order totals than their
+two-term counterparts. The number of executive orders per day in office may be more useful in
+these cases.
 
 ```{r}
 orders_by_presidents <- group_by(presidents, name, party) |>
@@ -77,21 +107,21 @@ orders_by_presidents <- group_by(presidents, name, party) |>
 kable(orders_by_presidents)
 ```
 
-```{r, echo=FALSE, fig.height=6, fig.width=8}
+```{r, fig.height=6, fig.width=8}
 ggplot(orders_by_presidents) +
   geom_col(
     aes(fct_reorder(name, first_term_start), num_orders, fill = party)
   ) +
   labs(x = "President", y = "Executive Orders") +
   scale_y_continuous(
-    breaks = seq(0, 2500, by = 200),
+    breaks = seq(0, 1e3, by = 100),
     expand = expansion(mult = c(0, 0.05), add = 0)
   ) +
   party_colors +
   custom_theme
 ```
 
-```{r, echo=FALSE, fig.height=6, fig.width=8}
+```{r, fig.height=6, fig.width=8}
 ggplot(orders_by_presidents) +
   geom_col(
     aes(
@@ -110,6 +140,13 @@ ggplot(orders_by_presidents) +
 ```
 
 ## Orders by Term
+
+Presidents who serve nonconsecutive terms often behave differently than those who serve
+consecutive terms. For example, a president serving consecutive terms is not often considered to
+have a second "100 days" milestone for their second term.
+
+These charts break nonconsecutive terms into two separate bars so that each term can be considered
+separately.
 
 ```{r}
 orders_by_terms <- inner_join(
@@ -130,19 +167,19 @@ orders_by_terms <- inner_join(
 kable(orders_by_terms)
 ```
 
-```{r, echo=FALSE, fig.height=6, fig.width=8}
+```{r, fig.height=6, fig.width=8}
 ggplot(orders_by_terms) +
   geom_col(aes(fct_reorder(term_id, term_start), num_orders, fill = party)) +
   labs(x = "Presidental Term", y = "Executive Orders") +
   scale_y_continuous(
-    breaks = seq(0, 2500, by = 200),
+    breaks = seq(0, 1e3, by = 100),
     expand = expansion(mult = c(0, 0.05), add = 0)
   ) +
   party_colors +
   custom_theme
 ```
 
-```{r, echo=FALSE, fig.height=6, fig.width=8}
+```{r, fig.height=6, fig.width=8}
 ggplot(orders_by_terms) +
   geom_col(
     aes(fct_reorder(term_id, term_start), orders_per_day, fill = party)
@@ -157,6 +194,10 @@ ggplot(orders_by_terms) +
 ```
 
 ## Orders in First 100 days
+
+Since the turn of the century, whenever a president enters office, they immediately issue a flurry
+of orders. Often, this is said to be "undoing" orders from their predecessor. This chart considers
+how many orders each president issued during their first 100 days in office. 
 
 ```{r}
 orders_100_days <- inner_join(
@@ -174,7 +215,7 @@ orders_100_days <- inner_join(
 kable(orders_100_days)
 ```
 
-```{r, echo=FALSE, fig.height=6, fig.width=8}
+```{r, fig.height=6, fig.width=8}
 ggplot(orders_100_days) +
   geom_col(aes(fct_reorder(term_id, term_start), num_orders, fill = party)) +
   labs(x = "Presidental Term", y = "Executive Orders In First 100 Days") +
@@ -186,7 +227,15 @@ ggplot(orders_100_days) +
   custom_theme
 ```
 
-## Orders Over Term
+## Orders Over Adminstration
+
+We can also consider trends in how orders are dispersed throughout the presidental adminstration.
+For example, we can clearly see a trend to issue more orders at the end of one's administration,
+whether that be a single or double term. However, that trend appears to be more pronounced in
+single-term presidents.
+
+Another thing to consider is major world events. For example, George W Bush issued a surge of
+orders at the end of his first year in response to the 9/11 attacks and the wars that followed.
 
 ```{r}
 daily_order_totals <- inner_join(
@@ -201,16 +250,32 @@ daily_order_totals <- inner_join(
   mutate(days_into_term = date - term_start) |>
   group_by(term_id, term_start, days_into_term) |>
   summarize(num_on_day = length(date)) |>
-  mutate(num_before_day = cumsum(num_on_day)) |>
+  mutate(
+    num_before_day = cumsum(num_on_day),
+    years_into_term = days_into_term / 365.25
+  ) |>
   arrange(term_start)
 ```
 
 ```{r, fig.height=6, fig.width=10}
 ggplot(daily_order_totals) +
-  geom_line(aes(days_into_term, num_before_day, color = fct_reorder(term_id, term_start))) +
-  labs(x = "Days Into Presidential Term", y = "Total Executive Orders", color = "President") +
-  scale_x_continuous(breaks = seq(0, 9 * 365, 180), expand = expansion(mult = 0, add = 25)) +
+  geom_line(aes(years_into_term, num_before_day, color = fct_reorder(term_id, term_start))) +
+  labs(x = "Years Into Presidential Administration", y = "Total Executive Orders", color = "President") +
+  scale_x_continuous(breaks = 0:8, minor_breaks = seq(0, 8, 0.25)) +
   scale_y_continuous(breaks = seq(0, 1000, 100), expand = expansion(mult = 0, add = 10)) +
   theme_linedraw() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom", plot.margin = margin(15, 15, 15, 15))
+```
+
+### Administrations Since 2000
+```{r, fig.height=6, fig.width=10}
+daily_order_totals |>
+  filter(term_start > ymd("2000-01-01")) |>
+  ggplot() +
+  geom_line(aes(years_into_term, num_before_day, color = fct_reorder(term_id, term_start))) +
+  labs(x = "Years Into Presidential Administration", y = "Total Executive Orders", color = "President") +
+  scale_x_continuous(breaks = 0:8, minor_breaks = seq(0, 8, 0.25)) +
+  scale_y_continuous(breaks = seq(0, 500, 25), expand = expansion(mult = 0, add = 10)) +
+  theme_linedraw() +
+  theme(legend.position = "bottom", plot.margin = margin(15, 15, 15, 15))
 ```
